@@ -113,4 +113,9 @@ runs:
     - name: Lint migrations
       if: inputs.lint == 'true'
       shell: bash
-      run: ch-migrate lint
+      run: |
+        if ch-migrate lint --help >/dev/null 2>&1; then
+          ch-migrate lint
+        else
+          echo "::warning::ch-migrate lint not available in this version, skipping"
+        fi
