@@ -20,7 +20,7 @@ inputs:
   ch-migrate-version:
     description: 'ch-migrate package version (pip specifier). Use "." to install from current directory.'
     required: false
-    default: 'clickhouse-alembic'
+    default: 'clickhouse-alembic @ git+https://github.com/DRYCodeWorks/clickhouse-migrate.git'
   lint:
     description: 'Run ch-migrate lint after migrations (true/false)'
     required: false
