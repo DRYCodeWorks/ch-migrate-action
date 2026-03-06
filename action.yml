@@ -70,6 +70,7 @@ runs:
           -p ${{ inputs.clickhouse-port }}:8123 \
           -e CLICKHOUSE_DB=default \
           -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+          -e CLICKHOUSE_PASSWORD=ci_admin_pass \
           clickhouse/clickhouse-server:${{ inputs.clickhouse-version }}
 
         echo "container-id=$(docker inspect --format='{{.Id}}' ch-migrate-ci)" >> "$GITHUB_OUTPUT"
@@ -79,7 +80,7 @@ runs:
       run: |
         echo "Waiting for ClickHouse to be ready..."
         for i in $(seq 1 30); do
-          if curl -s "http://localhost:${{ inputs.clickhouse-port }}/ping" | grep -q "Ok"; then
+          if curl -s "http://localhost:${{ inputs.clickhouse-port }}/ping" 2>/dev/null | grep -q "Ok"; then
             echo "ClickHouse is ready."
             exit 0
           fi
@@ -94,8 +95,8 @@ runs:
       shell: bash
       run: |
         ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
-        # Set empty admin password (local CH default user has no password)
-        echo "CH_${ENV_UPPER}_ADMIN_PASSWORD=" >> "$GITHUB_ENV"
+        # Admin password matches CLICKHOUSE_PASSWORD set on the container
+        echo "CH_${ENV_UPPER}_ADMIN_PASSWORD=ci_admin_pass" >> "$GITHUB_ENV"
         # Set a test password for the migration user
         echo "CH_${ENV_UPPER}_MIGRATION_PASSWORD=ci_test_password" >> "$GITHUB_ENV"
 

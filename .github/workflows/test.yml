@@ -14,7 +14,7 @@ jobs:
       matrix:
         clickhouse-version: ['24.3', '24.8']
     env:
-      CH_CI_ADMIN_PASSWORD: ''
+      CH_CI_ADMIN_PASSWORD: ci_admin_pass
       CH_CI_MIGRATION_PASSWORD: ci_test_password
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +55,13 @@ jobs:
             -p 8123:8123 \
             -e CLICKHOUSE_DB=default \
             -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            -e CLICKHOUSE_PASSWORD=ci_admin_pass \
             clickhouse/clickhouse-server:${{ matrix.clickhouse-version }}
 
       - name: Wait for ClickHouse ready
         run: |
           for i in $(seq 1 30); do
-            if curl -s "http://localhost:8123/ping" | grep -q "Ok"; then
+            if curl -s "http://localhost:8123/ping" 2>/dev/null | grep -q "Ok"; then
               echo "ClickHouse is ready."
               exit 0
             fi
@@ -84,8 +85,8 @@ jobs:
 
       - name: Verify ClickHouse state
         run: |
-          curl -s "http://localhost:8123/?query=SELECT+version()" | head -1
-          curl -s "http://localhost:8123/?query=SHOW+DATABASES" | grep ci_test_db
+          curl -s "http://default:ci_admin_pass@localhost:8123/?query=SELECT+version()" | head -1
+          curl -s "http://default:ci_admin_pass@localhost:8123/?query=SHOW+DATABASES" | grep ci_test_db
 
       - name: Cleanup
         if: always()
@@ -135,7 +136,7 @@ jobs:
 
       - name: Verify
         run: |
-          curl -s "http://localhost:8123/?query=SHOW+DATABASES" | grep action_test_db
+          curl -s "http://default:ci_admin_pass@localhost:8123/?query=SHOW+DATABASES" | grep action_test_db
 
       - name: Cleanup
         if: always()
