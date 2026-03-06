@@ -89,11 +89,19 @@ runs:
         docker logs ch-migrate-ci
         exit 1
 
+    - name: Set CI credentials
+      if: inputs.bootstrap == 'true'
+      shell: bash
+      run: |
+        ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+        # Set empty admin password (local CH default user has no password)
+        echo "CH_${ENV_UPPER}_ADMIN_PASSWORD=" >> "$GITHUB_ENV"
+        # Set a test password for the migration user
+        echo "CH_${ENV_UPPER}_MIGRATION_PASSWORD=ci_test_password" >> "$GITHUB_ENV"
+
     - name: Bootstrap database
       if: inputs.bootstrap == 'true'
       shell: bash
-      env:
-        CH_ADMIN_PASSWORD: ''
       run: ch-migrate bootstrap ${{ inputs.environment }}
 
     - name: Run migrations

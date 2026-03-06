@@ -13,6 +13,9 @@ jobs:
     strategy:
       matrix:
         clickhouse-version: ['24.3', '24.8']
+    env:
+      CH_CI_ADMIN_PASSWORD: ''
+      CH_CI_MIGRATION_PASSWORD: ci_test_password
     steps:
       - uses: actions/checkout@v4
 
@@ -70,8 +73,6 @@ jobs:
       - name: Bootstrap database
         working-directory: test-project
         run: ch-migrate bootstrap ci
-        env:
-          CH_ADMIN_PASSWORD: ''
 
       - name: Run migrations
         working-directory: test-project
