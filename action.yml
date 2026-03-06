@@ -1,0 +1,107 @@
+name: 'ch-migrate CI'
+description: 'Install ch-migrate, start ClickHouse, and run migrations with optional linting'
+branding:
+  icon: 'database'
+  color: 'yellow'
+
+inputs:
+  environment:
+    description: 'ch-migrate environment name (must match config.yaml)'
+    required: false
+    default: 'ci'
+  clickhouse-version:
+    description: 'ClickHouse server version to use'
+    required: false
+    default: '24.8'
+  python-version:
+    description: 'Python version for ch-migrate'
+    required: false
+    default: '3.12'
+  ch-migrate-version:
+    description: 'ch-migrate package version (pip specifier). Use "." to install from current directory.'
+    required: false
+    default: 'clickhouse-alembic'
+  lint:
+    description: 'Run ch-migrate lint after migrations (true/false)'
+    required: false
+    default: 'true'
+  bootstrap:
+    description: 'Run ch-migrate bootstrap before migrations (true/false)'
+    required: false
+    default: 'true'
+  migrate:
+    description: 'Run ch-migrate up after bootstrap (true/false)'
+    required: false
+    default: 'true'
+  clickhouse-port:
+    description: 'Host port to expose for ClickHouse HTTP interface'
+    required: false
+    default: '8123'
+
+outputs:
+  clickhouse-container-id:
+    description: 'Docker container ID of the running ClickHouse server'
+    value: ${{ steps.start-ch.outputs.container-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install ch-migrate
+      shell: bash
+      run: |
+        if [ "${{ inputs.ch-migrate-version }}" = "." ]; then
+          pip install .
+        else
+          pip install "${{ inputs.ch-migrate-version }}"
+        fi
+        ch-migrate --version
+
+    - name: Start ClickHouse server
+      id: start-ch
+      shell: bash
+      run: |
+        docker run -d \
+          --name ch-migrate-ci \
+          -p ${{ inputs.clickhouse-port }}:8123 \
+          -e CLICKHOUSE_DB=default \
+          -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+          clickhouse/clickhouse-server:${{ inputs.clickhouse-version }}
+
+        echo "container-id=$(docker inspect --format='{{.Id}}' ch-migrate-ci)" >> "$GITHUB_OUTPUT"
+
+    - name: Wait for ClickHouse ready
+      shell: bash
+      run: |
+        echo "Waiting for ClickHouse to be ready..."
+        for i in $(seq 1 30); do
+          if curl -s "http://localhost:${{ inputs.clickhouse-port }}/ping" | grep -q "Ok"; then
+            echo "ClickHouse is ready."
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "::error::ClickHouse failed to start within 30 seconds"
+        docker logs ch-migrate-ci
+        exit 1
+
+    - name: Bootstrap database
+      if: inputs.bootstrap == 'true'
+      shell: bash
+      env:
+        CH_ADMIN_PASSWORD: ''
+      run: ch-migrate bootstrap ${{ inputs.environment }}
+
+    - name: Run migrations
+      if: inputs.migrate == 'true'
+      shell: bash
+      run: ch-migrate up ${{ inputs.environment }}
+
+    - name: Lint migrations
+      if: inputs.lint == 'true'
+      shell: bash
+      run: ch-migrate lint

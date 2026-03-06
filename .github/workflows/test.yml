@@ -1,0 +1,142 @@
+name: Test Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-self-hosted-mode:
+    name: Test with ClickHouse ${{ matrix.clickhouse-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        clickhouse-version: ['24.3', '24.8']
+    defaults:
+      run:
+        working-directory: test-project
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Initialize test project
+        run: |
+          pip install clickhouse-alembic
+          ch-migrate init .
+
+          # Configure CI environment for local ClickHouse (HTTP, no TLS)
+          cat > config.yaml << 'EOF'
+          project:
+            name: ci_test
+
+          defaults:
+            port: 8123
+            secure: false
+            admin_user: default
+
+          environments:
+            ci:
+              host: localhost
+              database: ci_test_db
+              migration_user: ci_migration
+          EOF
+
+      - name: Start ClickHouse server
+        working-directory: .
+        run: |
+          docker run -d \
+            --name ch-migrate-ci \
+            -p 8123:8123 \
+            -e CLICKHOUSE_DB=default \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:${{ matrix.clickhouse-version }}
+
+      - name: Wait for ClickHouse ready
+        working-directory: .
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s "http://localhost:8123/ping" | grep -q "Ok"; then
+              echo "ClickHouse is ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::ClickHouse failed to start within 30 seconds"
+          docker logs ch-migrate-ci
+          exit 1
+
+      - name: Bootstrap database
+        run: ch-migrate bootstrap ci
+        env:
+          CH_ADMIN_PASSWORD: ''
+
+      - name: Run migrations
+        run: ch-migrate up ci
+
+      - name: Lint migrations (static)
+        run: ch-migrate lint
+
+      - name: Verify ClickHouse state
+        working-directory: .
+        run: |
+          curl -s "http://localhost:8123/?query=SELECT+version()" | head -1
+          curl -s "http://localhost:8123/?query=SHOW+DATABASES" | grep ci_test_db
+
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker rm -f ch-migrate-ci || true
+
+  test-composite-action:
+    name: Test composite action end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create test project in repo root
+        run: |
+          pip install clickhouse-alembic
+          ch-migrate init .
+
+          cat > config.yaml << 'EOF'
+          project:
+            name: action_test
+
+          defaults:
+            port: 8123
+            secure: false
+            admin_user: default
+
+          environments:
+            ci:
+              host: localhost
+              database: action_test_db
+              migration_user: action_migration
+          EOF
+
+      - name: Run ch-migrate action
+        uses: ./
+        with:
+          environment: ci
+          clickhouse-version: '24.8'
+          lint: 'true'
+          bootstrap: 'true'
+          migrate: 'true'
+
+      - name: Verify
+        run: |
+          curl -s "http://localhost:8123/?query=SHOW+DATABASES" | grep action_test_db
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ch-migrate-ci || true
